@@ -1,0 +1,27 @@
+config {
+  type: 'operations',
+  schema: 'sales_sample_sources',
+  name: 'shop_order_line',
+  description: '店頭の注文明細（スプレッドシート参照）',
+  hasOutput: true,
+  tags: ['99_sources']
+}
+
+CREATE OR REPLACE EXTERNAL TABLE `sales_sample_sources.shop_order_line` (
+  receipt_id STRING OPTIONS(description='レシートID'),
+  order_line_index INT64 OPTIONS(description='明細番号'),
+  created_at DATE OPTIONS(description='日付'),
+  product_name STRING OPTIONS(description='商品名'),
+  quantity INT64 OPTIONS(description='数量'),
+  price INT64 OPTIONS(description='価格'),
+  customer_id STRING OPTIONS(description='顧客ID'),
+  discount_code INT64 OPTIONS(description='値引きコード'),
+  discount_name STRING OPTIONS(description='値引き名')
+)
+OPTIONS (
+  description = '店頭注文明細（スプレッドシート参照）',
+  format = 'GOOGLE_SHEETS',
+  uris = ['https://docs.google.com/spreadsheets/d/${dataform.projectConfig.vars.SOURCE_SPREADSHEET_ID}'],
+  sheet_range = "'shop_order_line'!A:I",
+  skip_leading_rows = 1
+);

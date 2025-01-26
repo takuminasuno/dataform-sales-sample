@@ -1,0 +1,22 @@
+config {
+  type: 'table',
+  schema: 'sales_sample_output',
+  name: 'customer_order_total',
+  description: '顧客注文（累計）',
+  tags: ['02_creating_from_inner_tables']
+}
+
+SELECT
+  customer_id,
+  MIN(create_date) AS first_purchase_date,
+  MAX(create_date) AS last_purchase_date,
+  SUM(price) AS total_purchase_amount,
+  COUNT(unified_order_id) AS total_purchase_count,
+  SUM(total_discount) AS total_purchase_discount,
+  ROUND(SUM(total_discount) / SUM(price),3) AS total_discount_rate
+FROM
+  ${ref('order')}
+WHERE
+  customer_id IS NOT NULL
+GROUP BY
+  customer_id

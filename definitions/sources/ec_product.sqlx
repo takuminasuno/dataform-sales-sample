@@ -1,0 +1,23 @@
+config {
+  type: 'operations',
+  schema: 'sales_sample_sources',
+  name: 'ec_product',
+  description: 'ECの商品一覧（スプレッドシート参照）',
+  hasOutput: true,
+  tags: ['99_sources']
+}
+
+CREATE OR REPLACE EXTERNAL TABLE `sales_sample_sources.ec_product` (
+  product_id STRING OPTIONS(description='商品ID'),
+  product_name STRING OPTIONS(description='商品名'),
+  product_category STRING OPTIONS(description='商品カテゴリ'),
+  product_price INT64 OPTIONS(description='商品価格'),
+  product_average_cost INT64 OPTIONS(description='商品平均原価')
+)
+OPTIONS (
+  description = 'ECの商品一覧（スプレッドシート参照）',
+  format = 'GOOGLE_SHEETS',
+  uris = ['https://docs.google.com/spreadsheets/d/${dataform.projectConfig.vars.SOURCE_SPREADSHEET_ID}'],
+  sheet_range = "'ec_product'!A:E",
+  skip_leading_rows = 1
+);

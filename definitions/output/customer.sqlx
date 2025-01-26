@@ -1,0 +1,301 @@
+config {
+  type: 'operations',
+  schema: 'sales_sample_output',
+  name: 'customer',
+  description: '顧客一覧',
+  hasOutput: true,
+  tags: ['02_creating_from_inner_tables']
+}
+
+-- JavaScript functionsを使うため、やむなくoperationsで作成
+
+-- RFMのRecency計算
+CREATE TEMP FUNCTION get_age(
+  date_of_birth DATE,
+  yesterday DATE
+)
+RETURNS STRING
+LANGUAGE js
+AS r"""
+  const milli_seconds = 24 * 60 * 60 * 1000;
+  const year_diff = Math.floor((yesterday - date_of_birth) / milli_seconds / 365);
+  return Math.floor(year_diff / 10) + '0代';
+""";
+
+-- RFMのRecency計算
+CREATE TEMP FUNCTION get_purchase_recency_segment(
+  last_purchase_date DATE,
+  yesterday DATE
+)
+RETURNS STRING
+LANGUAGE js
+AS r"""
+  const milli_seconds = 24 * 60 * 60 * 1000;
+  const date_diff = Math.floor((yesterday - last_purchase_date) / milli_seconds);
+  if (date_diff <= 30){
+    return 'R1_30日以内';
+  } else if (date_diff <= 90){
+    return 'R2_90日以内';
+  } else if (date_diff <= 180){
+    return 'R3_180日以内';
+  } else if (date_diff <= 365){
+    return 'R4_1年以内';
+  }
+  return 'R5_1年よりも前'
+""";
+
+-- RFMのFreqency計算
+CREATE TEMP FUNCTION get_purchase_frequency_segment(
+  one_year_purchase_count INT64
+)
+RETURNS STRING
+LANGUAGE js
+AS r"""
+  if (one_year_purchase_count >= 12){
+    return 'F1_毎月';
+  } else if (one_year_purchase_count >= 4){
+    return 'F2_2～3か月に1回';
+  } else if (one_year_purchase_count >= 2){
+    return 'F3_半年に1回';
+  } else if (one_year_purchase_count >= 1){
+    return 'F4_年に1回';
+  } 
+  return 'F5_年1回未満'
+""";
+
+-- RFMのMonetary計算
+CREATE TEMP FUNCTION get_purchase_monetary_segment(
+  total_purchase_amount INT64
+)
+RETURNS STRING
+LANGUAGE js
+AS r"""
+  if (total_purchase_amount >= 1000000){
+    return 'M1_100万円以上';
+  } else if (total_purchase_amount >= 100000){
+    return 'M2_10万円以上';
+  } else if (total_purchase_amount >= 10000){
+    return 'M3_1万円以上';
+  } else if (total_purchase_amount >= 1000){
+    return 'M4_千円以上';
+  } 
+  return 'M5_千円未満';
+""";
+
+-- 購入商品セグメント
+CREATE TEMP FUNCTION get_purchase_product_segment(
+  product_summary ARRAY<STRUCT<create_date DATE, product_category STRING>>
+)
+RETURNS STRING
+LANGUAGE js
+AS r"""
+  /* 直近5個の購入商品カテゴリーで最も多い2カテゴリーを抽出 */
+  /* なお同率の場合は、より直近のカテゴリーを優先 */
+
+  /* まずはカウント */
+  product_summary = product_summary.slice(0,5);
+  const result = Object.values(
+    product_summary.reduce((acc, {create_date, product_category}) => {
+      if (!acc[product_category]) {
+        acc[product_category] = {category: product_category, date: create_date, count: 0};
+      }
+      acc[product_category].count += 1;
+      return acc;
+    }, {})
+  );
+
+  /* 上位2カテゴリーを抽出し、カテゴリー組み合わせがユニークになるよう昇順ソートしたうえで文字列結合して返す */
+  return result
+    .sort((a, b) => b.count - a.count || new Date(b.date) - new Date(a.date))
+    .slice(0, 2)
+    .sort((a, b) => {
+      if (a.category > b.category) return 1;
+      if (a.category < b.category) return -1;
+      return 0;
+    })
+    .map(a => a.category)
+    .join('+');
+""";
+
+-- 購入経路セグメント
+CREATE TEMP FUNCTION get_purchase_channel_segment(
+  channel_summary ARRAY<STRUCT<create_date DATE, sales_channel STRING>>
+)
+RETURNS STRING
+LANGUAGE js
+AS r"""
+  /* 単純集計してECと店頭の比率のみでセグメント分けする */
+
+  /* まずはカウントして、比率を出しておく */
+  const counts = channel_summary.reduce((acc, record) => {
+    const key = record.sales_channel;
+    if (acc[key]) {
+        acc[key] += 1;
+    } else {
+        acc[key] = 1;
+    }
+    return acc;
+  }, {});
+  const total_count = Object.values(counts).reduce((sum, count) => sum + count, 0);
+  const shop_ratio = counts['店頭'] / total_count;
+  const ec_ratio = counts['EC'] / total_count;
+
+  /* 比率に応じてセグメントを設定 */
+  if (shop_ratio == 1){
+    return '01_店頭のみ';
+  } else if (shop_ratio >= 0.7){
+    return '02_店頭中心';
+  } else if (ec_ratio == 1){
+    return '05_ECのみ';
+  } else if (ec_ratio >= 0.7){
+    return '04_EC中心';
+  }
+  return '03_店頭・EC混在';
+""";
+
+-- 値引き反応率セグメント
+CREATE TEMP FUNCTION get_discount_response_segment(
+  one_year_discount_rate FLOAT64
+)
+RETURNS STRING
+LANGUAGE js
+AS r"""
+  if (one_year_discount_rate > 0.1){
+    return 'D5_10%以上';
+  } else if (one_year_discount_rate > 0.05){
+    return 'D4_5%以上';
+  } else if (one_year_discount_rate > 0.03){
+    return 'D3_3%以上';
+  } else if (one_year_discount_rate > 0){
+    return 'D2_3%未満';
+  }
+  return 'D1_値引きなし';
+""";
+
+-- RFM計算
+CREATE TEMP FUNCTION get_marketing_segment(
+  frequency STRING,
+  monetary STRING,
+  one_year_discount_rate FLOAT64
+)
+RETURNS STRING
+LANGUAGE js
+AS r"""
+  const f = frequency.slice(0,2);
+  const m = monetary.slice(0,2);
+
+  if (m == 'M1'){
+    return '01_プレミアム'; // 累計100万円以上
+
+  } else if (f == 'F1'){
+    return '02_ロイヤル'; // 毎月購入あり(≒累計10万円以上)
+
+  } else if (f == 'F2' || f == 'F3'){
+    if (one_year_discount_rate >= 0.1){
+      return '05_ディールハンター';
+
+    } else if (m == 'M2'){
+      return '03_ライトロイヤル'; // 数か月に1回購入×累計10万円以上
+
+    } else {
+      return '04_カジュアル'; // 数か月に1回購入×累計10万円未満
+    }
+  }
+  return '06_ノンアクティブ'; // 年に1回購入以下
+""";
+
+CREATE OR REPLACE TABLE `sales_sample_output.customer` (
+  
+  -- ID
+  customer_id STRING OPTIONS(description='顧客ID'),
+
+  -- 基本属性
+  gender STRING OPTIONS(description='性別'),
+  age STRING OPTIONS(description='年代'),
+  prefecture STRING OPTIONS(description='都道府県'),
+  region STRING OPTIONS(description='地域'),
+
+  -- 集計値
+  first_purchase_date DATE OPTIONS(description='初回購入日'),
+  last_purchase_date DATE OPTIONS(description='最終購入日'),
+  total_purchase_amount INT64 OPTIONS(description='累計購入金額'),
+  total_purchase_count INT64 OPTIONS(description='累計購入回数'),
+  total_purchase_discount INT64 OPTIONS(description='累計値引き額'),
+  total_discount_rate FLOAT64 OPTIONS(description='累計平均値引き率'),
+  one_year_purchase_amount INT64 OPTIONS(description='年あたり購入金額'),
+  one_year_purchase_count INT64 OPTIONS(description='年あたり購入回数'),
+  one_year_purchase_discount INT64 OPTIONS(description='年あたり値引き額'),
+  one_year_discount_rate FLOAT64 OPTIONS(description='年あたり平均値引き率'),
+
+  -- 嗜好性セグメント
+  purchase_product_segment STRING OPTIONS(description='購入商品セグメント'),
+  purchase_channel_segment STRING OPTIONS(description='購入経路セグメント'),
+  discount_response_segment STRING OPTIONS(description='値引き感応度セグメント'),
+
+  -- 購買セグメント（RFM）
+  purchase_recency_segment STRING OPTIONS(description='R.最終購入日セグメント'),
+  purchase_frequency_segment STRING OPTIONS(description='F.購入頻度セグメント'),
+  purchase_monetary_segment STRING OPTIONS(description='M.購入金額セグメント'),
+
+  -- 総合セグメント
+  marketing_segment STRING OPTIONS(description='マーケティングセグメント'),
+
+)
+OPTIONS (
+  description='顧客一覧'
+)
+AS (
+  WITH temp AS (
+    SELECT
+      -- ID
+      t.customer_id,
+
+      -- 基本属性
+      c.gender,
+      get_age(c.date_of_birth, ${dataform.projectConfig.vars.YESTERDAY}) AS age,
+      c.prefecture,
+      c.region,
+
+      -- 集計値
+      t.first_purchase_date,
+      t.last_purchase_date,
+      t.total_purchase_amount,
+      t.total_purchase_count,
+      t.total_purchase_discount,
+      t.total_discount_rate,
+      s.total_purchase_amount AS one_year_purchase_amount,
+      s.total_purchase_count AS one_year_purchase_count,
+      s.total_purchase_discount AS one_year_purchase_discount,
+      s.total_discount_rate AS one_year_discount_rate,
+
+      -- 嗜好性セグメント
+      get_purchase_product_segment(d.product_summary) AS purchase_product_segment,
+      get_purchase_channel_segment(d.channel_summary) AS purchase_channel_segment,
+      get_discount_response_segment(s.total_discount_rate) AS discount_response_segment,
+
+      -- 購買セグメント（RFM）
+      get_purchase_recency_segment(t.last_purchase_date, ${dataform.projectConfig.vars.YESTERDAY}) AS purchase_recency_segment,
+      get_purchase_frequency_segment(s.total_purchase_count) AS purchase_frequency_segment,
+      get_purchase_monetary_segment(t.total_purchase_amount) AS purchase_monetary_segment
+
+    FROM
+      ${ref('customer_order_total')} t
+    LEFT JOIN ${ref('customer_order_one_year_subset')} s
+      ON t.customer_id = s.customer_id
+    LEFT JOIN ${ref('customer_order_line_detail')} d
+      ON t.customer_id = d.customer_id
+    LEFT JOIN ${ref('ec_customer')} c
+      ON t.customer_id = c.customer_id
+  )
+  SELECT
+    *,
+    get_marketing_segment(
+      purchase_frequency_segment,
+      purchase_monetary_segment,
+      one_year_discount_rate
+    ) AS marketing_segment
+  FROM
+    temp
+  ORDER BY
+    customer_id ASC
+);

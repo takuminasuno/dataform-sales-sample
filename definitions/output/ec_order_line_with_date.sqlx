@@ -1,0 +1,105 @@
+config {
+  type: 'operations',
+  schema: 'sales_sample_output',
+  name: 'ec_order_line_with_date',
+  description: 'EC注文明細（日付情報を補完）',
+  hasOutput: true,
+  tags: ['01_clensing_from_outer_tables']
+}
+
+-- (1/3) 初回の場合、累積テーブルを作成
+CREATE TABLE IF NOT EXISTS `sales_sample_output.ec_order_line_with_date` (
+  order_id STRING OPTIONS(description='注文ID'),
+  order_line_index INT64 OPTIONS(description='明細番号'),
+  create_date DATE OPTIONS(description='日付'),
+  create_datetime DATETIME OPTIONS(description='日時'),
+  customer_id STRING OPTIONS(description='顧客ID'),
+  product_name STRING OPTIONS(description='商品名'),
+  product_id STRING OPTIONS(description='商品ID'),
+  product_category STRING OPTIONS(description='商品カテゴリ'),
+  quantity INT64 OPTIONS(description='数量'),
+  line_price INT64 OPTIONS(description='明細価格'),
+  line_discount INT64 OPTIONS(description='明細値引き額'),
+  line_price_before_discount INT64 OPTIONS(description='値引き前明細価格')
+)
+PARTITION BY create_date
+OPTIONS (
+  description = 'EC注文明細（日付情報を補完）'
+);
+
+-- (2/3) 更新期間内の差分テーブルを作成
+CREATE OR REPLACE TABLE `sales_sample_intermediate.ec_order_line_with_date_incremental` AS (
+  SELECT
+    a.order_id,
+    a.order_line_index,
+    DATE(b.created_at) AS create_date,
+    b.created_at AS create_datetime,
+    b.customer_id,
+    p.product_name,
+    a.product_id,
+    p.product_category,
+    a.quantity,
+    a.line_price,
+    a.line_discount,
+    a.line_price_before_discount
+  FROM
+    ${ref('ec_order_line')} a
+  LEFT JOIN ${ref('ec_order')} b
+    ON a.order_id = b.order_id
+  LEFT JOIN ${ref('product')} p
+    ON a.product_id = p.product_id
+  WHERE
+    b.created_at ${dataform.projectConfig.vars.EQUALS_CALC_DATETIME}
+  ORDER BY order_id ASC, order_line_index ASC
+);
+
+-- (3/3) 差分テーブルを累積テーブルにマージ
+MERGE `sales_sample_output.ec_order_line_with_date` AS t
+  USING `sales_sample_intermediate.ec_order_line_with_date_incremental` AS s
+  ON t.order_id = s.order_id
+  AND t.order_line_index = s.order_line_index
+WHEN NOT MATCHED BY SOURCE
+  AND t.create_date ${dataform.projectConfig.vars.EQUALS_CALC_DATETIME} THEN
+  DELETE
+WHEN MATCHED THEN
+  UPDATE SET
+    t.create_date                = s.create_date,
+    t.create_datetime            = s.create_datetime,
+    t.customer_id                = s.customer_id,
+    t.product_name               = s.product_name,
+    t.product_id                 = s.product_id,
+    t.product_category           = s.product_category,
+    t.quantity                   = s.quantity,
+    t.line_price                 = s.line_price,
+    t.line_discount              = s.line_discount,
+    t.line_price_before_discount = s.line_price_before_discount
+WHEN NOT MATCHED THEN
+  INSERT (
+    order_id,
+    order_line_index,
+    create_date,
+    create_datetime,
+    customer_id,
+    product_name,
+    product_id,
+    product_category,
+    quantity,
+    line_price,
+    line_discount,
+    line_price_before_discount
+  )
+  VALUES (
+    s.order_id,
+    s.order_line_index,
+    s.create_date,
+    s.create_datetime,
+    s.customer_id,
+    s.product_name,
+    s.product_id,
+    s.product_category,
+    s.quantity,
+    s.line_price,
+    s.line_discount,
+    s.line_price_before_discount
+);
+

@@ -1,0 +1,18 @@
+config {
+  type: 'table',
+  schema: 'sales_sample_output',
+  name: 'customer_order_line_detail',
+  description: '顧客注文明細（詳細）',
+  tags: ['02_creating_from_inner_tables']
+}
+
+SELECT
+  customer_id,
+  ARRAY_AGG(STRUCT(create_date,product_category) ORDER BY create_date DESC) AS product_summary,
+  ARRAY_AGG(STRUCT(create_date,sales_channel) ORDER BY create_date DESC) AS channel_summary
+FROM
+  ${ref('order_line')}
+WHERE
+  customer_id IS NOT NULL
+GROUP BY
+  customer_id

@@ -1,0 +1,66 @@
+config {
+  type: 'incremental',
+  schema: 'sales_sample_output',
+  name: 'order_incremental',
+  description: '注文一覧（店頭とECを統合）',
+  columns: {
+    unified_order_id:' 統合注文ID',
+    create_date: '日付',
+    create_datetime: '日時',
+    customer_id: '顧客ID',
+    price: '価格',
+    price_before_discount: '値引き前価格',
+    total_discount: '値引き額合計',
+    total_line_discount: '明細値引き額合計',
+    order_discount: '注文値引き額',
+    sales_channel: '販売チャネル'
+  },
+  uniqueKey: ["unified_order_id"],
+  bigquery: {
+    partitionBy: "create_date",
+    updatePartitionFilter: "create_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)"
+  }
+}
+
+pre_operations {
+  DECLARE create_date_checkpoint DEFAULT (
+    ${when(incremental(),
+    `SELECT DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)`,
+    `SELECT DATE(2001,1,1)`)}
+  )
+}
+
+-- 店頭データを生成
+SELECT
+  CONCAT('S_',receipt_id) AS unified_order_id,
+  create_date,
+  NULL AS create_datetime,
+  customer_id,
+  price,
+  price_before_discount,
+  total_discount,
+  total_line_discount,
+  order_discount,
+  '店頭' AS sales_channel
+FROM
+  ${ref('shop_order')}
+WHERE
+  create_date >= create_date_checkpoint
+
+-- ECデータを結合
+UNION ALL
+SELECT
+  CONCAT('E_',order_id) AS unified_order_id,
+  DATE(created_at) AS create_date,
+  created_at AS create_datetime,
+  customer_id,
+  price,
+  price_before_discount,
+  total_discount,
+  total_line_discount,
+  order_discount,
+  'EC' AS sales_channel
+FROM
+  ${ref('ec_order')}
+WHERE
+  DATE(created_at) >= create_date_checkpoint

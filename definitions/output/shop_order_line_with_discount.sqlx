@@ -1,0 +1,39 @@
+config {
+  type: 'table',
+  schema: 'sales_sample_output',
+  name: 'shop_order_line_with_discount',
+  description: '店頭注文明細（値引き情報再現）',
+  columns: {
+    receipt_id: 'レシートID',
+    order_line_index: '明細番号',
+    create_date: '日付',
+    product_name: '商品名',
+    product_id: '商品ID',
+    product_category: '商品カテゴリ',
+    quantity: '数量',
+    line_price: '明細価格',
+    line_discount: '明細値引き額',
+    line_price_before_discount: '値引き前明細価格',
+    customer_id: '顧客ID'
+  },
+  bigquery: {
+    partitionBy: 'create_date'
+  },
+  tags: ['01_clensing_from_outer_tables']
+}
+
+SELECT
+  s.receipt_id,
+  s.order_line_index,
+  s.created_at AS create_date,
+  s.product_name,
+  p.product_id,
+  p.product_category,
+  s.quantity,
+  s.price AS line_price,
+  s.quantity * p.product_price - s.price AS line_discount,
+  s.quantity * p.product_price AS line_price_before_discount,
+  s.customer_id
+FROM ${ref('shop_order_line')} s
+LEFT JOIN ${ref('product')} p
+  ON s.product_name = p.product_name

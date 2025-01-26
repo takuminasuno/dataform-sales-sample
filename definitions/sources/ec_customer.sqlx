@@ -1,0 +1,23 @@
+config {
+  type: 'operations',
+  schema: 'sales_sample_sources',
+  name: 'ec_customer',
+  description: 'ECの顧客一覧（スプレッドシート参照）',
+  hasOutput: true,
+  tags: ['99_sources']
+}
+
+CREATE OR REPLACE EXTERNAL TABLE `sales_sample_sources.ec_customer` (
+  customer_id STRING OPTIONS(description='顧客ID'),
+  gender STRING OPTIONS(description='性別'),
+  date_of_birth DATE OPTIONS(description='誕生日'),
+  prefecture STRING OPTIONS(description='都道府県'),
+  region STRING OPTIONS(description='地域')
+)
+OPTIONS (
+  description = 'EC顧客一覧（スプレッドシート参照）',
+  format = 'GOOGLE_SHEETS',
+  uris = ['https://docs.google.com/spreadsheets/d/${dataform.projectConfig.vars.SOURCE_SPREADSHEET_ID}'],
+  sheet_range = "'ec_customer'!A:E",
+  skip_leading_rows = 1
+);

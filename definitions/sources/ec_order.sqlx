@@ -1,0 +1,26 @@
+config {
+  type: 'operations',
+  schema: 'sales_sample_sources',
+  name: 'ec_order',
+  description: 'ECの注文履歴（スプレッドシート参照）',
+  hasOutput: true,
+  tags: ['99_sources']
+}
+
+CREATE OR REPLACE EXTERNAL TABLE `sales_sample_sources.ec_order` (
+  order_id STRING OPTIONS(description='注文ID'),
+  created_at DATETIME OPTIONS(description='日時'),
+  customer_id STRING OPTIONS(description='顧客ID'),
+  price INT64 OPTIONS(description='価格'),
+  price_before_discount INT64 OPTIONS(description='値引き前価格'),
+  total_discount INT64 OPTIONS(description='値引き額合計'),
+  total_line_discount INT64 OPTIONS(description='明細値引き額合計'),
+  order_discount INT64 OPTIONS(description='注文値引き額')
+)
+OPTIONS (
+  description = 'ECの注文履歴（スプレッドシート参照）',
+  format = 'GOOGLE_SHEETS',
+  uris = ['https://docs.google.com/spreadsheets/d/${dataform.projectConfig.vars.SOURCE_SPREADSHEET_ID}'],
+  sheet_range = "'ec_order'!A:H",
+  skip_leading_rows = 1
+);

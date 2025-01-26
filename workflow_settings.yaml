@@ -1,0 +1,15 @@
+defaultProject: {bigquery_project_id}
+defaultLocation: {bigquery_project_location}
+defaultDataset: {bigquery_dataset_name}
+defaultAssertionDataset: dataform_assertions
+dataformCoreVersion: 3.0.0
+
+# プロジェクトの共通パラメータ（コンパイル時に上書きしうる）
+vars:
+  # ソースとなるスプレッドシートのID
+  SOURCE_SPREADSHEET_ID: '1nShXon7tEcSpm1jyVwl-ouYVAhpcln3Nzwuwhu1TiFI'
+
+  # 各種集計パラメータ 
+  EQUALS_CALC_DATETIME: BETWEEN '2001-01-01' AND '2025-12-31'
+  ONE_YEAR_AGO: DATE(2024,1,1)
+  YESTERDAY: DATE(2024,12,31)

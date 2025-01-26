@@ -1,0 +1,27 @@
+config {
+  type: 'table',
+  schema: 'sales_sample_output',
+  name: 'product',
+  description: '商品一覧',
+  columns: {
+    product_id: '商品ID',
+    product_name: '商品名',
+    product_category: '商品カテゴリ',
+    product_price: '商品価格',
+    product_average_cost: '商品平均原価'
+  },
+  tags: ['01_clensing_from_outer_tables']
+}
+
+SELECT
+  product_id,
+  product_name,
+  product_category,
+  product_price,
+  product_average_cost
+FROM
+  ${ref('ec_product')}
+WHERE
+  product_id IS NOT NULL
+ORDER BY
+  product_id ASC

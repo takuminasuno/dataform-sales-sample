@@ -1,0 +1,21 @@
+config {
+  type: 'table',
+  schema: 'sales_sample_output',
+  name: 'customer_order_one_year_subset',
+  description: '顧客注文（直近1年間）',
+  tags: ['02_creating_from_inner_tables']
+}
+
+SELECT
+  customer_id,
+  SUM(price) AS total_purchase_amount,
+  COUNT(unified_order_id) AS total_purchase_count,
+  SUM(total_discount) AS total_purchase_discount,
+  ROUND(SUM(total_discount) / SUM(price),3) AS total_discount_rate
+FROM
+  ${ref('order')}
+WHERE
+  customer_id IS NOT NULL
+  AND (create_date BETWEEN ${dataform.projectConfig.vars.ONE_YEAR_AGO} AND ${dataform.projectConfig.vars.YESTERDAY})
+GROUP BY
+  customer_id
